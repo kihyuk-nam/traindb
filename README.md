@@ -9,7 +9,11 @@ Currently, we are implementing a prototype for proof of concept.
 
 * Java 8+
 * Maven 3.x
-* SQLite3
+* Git, Subversion
+* DBMS(e.g. MySQL, SQLite3)
+* Python 3.x
+** Python Package Manager (e.g. Anaconda)
+* [SDGym](https://github.com/sdv-dev/SDGym)
 
 ## Install
 
