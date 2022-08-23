@@ -14,7 +14,6 @@
 
 package traindb.catalog.pm;
 
-import java.util.List;
 import javax.jdo.annotations.Column;
 import javax.jdo.annotations.IdGeneratorStrategy;
 import javax.jdo.annotations.PersistenceCapable;
@@ -34,19 +33,35 @@ public final class MSynopsis {
   @Column(length = CatalogConstants.IDENTIFIER_MAX_LENGTH)
   private String name;
 
-  @Persistent(dependent = "false")
-  private MModelInstance modelInstance;
+  @Persistent
+  private int rows;
 
-  public MSynopsis(String name, MModelInstance modelInstance) {
+  @Persistent
+  private double ratio;
+
+  @Persistent(dependent = "false")
+  private MModel model;
+
+  public MSynopsis(String name, Integer rows, Double ratio, MModel model) {
     this.name = name;
-    this.modelInstance = modelInstance;
+    this.rows = rows;
+    this.ratio = (ratio == null) ? 0 : ratio;
+    this.model = model;
   }
 
   public String getName() {
     return name;
   }
 
-  public MModelInstance getModelInstance() {
-    return modelInstance;
+  public int getRows() {
+    return rows;
+  }
+
+  public double getRatio() {
+    return ratio;
+  }
+
+  public MModel getModel() {
+    return model;
   }
 }

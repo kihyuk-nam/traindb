@@ -37,6 +37,8 @@ limitations under the License.
                         <includes>
                             <include>trsql</include>
                             <include>traindb-config.sh</include>
+                            <include>start-traindb.sh</include>
+                            <include>stop-traindb.sh</include>
                         </includes>
                         <fileMode>0755</fileMode>
                     </fileSet>
@@ -69,11 +71,8 @@ limitations under the License.
             </includes>
         </fileSet>
         <fileSet>
-            <directory>.</directory>
+            <directory>../traindb-project/src/main/resources/lib</directory>
             <outputDirectory>share/traindb/ext</outputDirectory>
-            <excludes>
-                <exclude>**/*</exclude>
-            </excludes>
         </fileSet>
         <fileSet>
             <directory>../traindb-model/src/main/python</directory>
@@ -91,6 +90,11 @@ limitations under the License.
             <source>../traindb-common/src/main/config/traindb.properties</source>
             <outputDirectory>conf</outputDirectory>
             <destName>traindb.properties</destName>
+        </file>
+        <file>
+            <source>../traindb-common/src/main/config/adapter-ext-config.json</source>
+            <outputDirectory>conf</outputDirectory>
+            <destName>adapter-ext-config.json</destName>
         </file>
     </files>
 

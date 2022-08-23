@@ -26,6 +26,7 @@ import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.tools.Frameworks;
+import org.apache.hadoop.service.AbstractService;
 import traindb.adapter.jdbc.TrainDBJdbcDataSource;
 import traindb.catalog.CatalogStore;
 import traindb.common.TrainDBLogger;
@@ -34,7 +35,7 @@ import traindb.common.TrainDBLogger;
 /**
  * Constructs in-memory schema from metadata in CatalogStore.
  */
-public final class SchemaManager {
+public final class SchemaManager extends AbstractService {
   private static TrainDBLogger LOG = TrainDBLogger.getLogger(SchemaManager.class);
   private static SchemaManager singletonInstance;
   private final CatalogStore catalogStore;
@@ -51,18 +52,25 @@ public final class SchemaManager {
   private SchemaPlus rootSchema;
 
   private SchemaManager(CatalogStore catalogStore) {
+    super(SchemaManager.class.getName());
     this.catalogStore = catalogStore;
     rootSchema = Frameworks.createRootSchema(false);
     traindbDataSource = null;
     dataSourceMap = new HashMap<>();
     schemaMap = new HashMap<>();
     tableMap = new HashMap<>();
+  }
 
-    try {
-      Class.forName("traindb.engine.calcite.Driver");
-    } catch (ClassNotFoundException e) {
-      // FIXME
-    }
+  @Override
+  protected void serviceStart() throws Exception {
+    super.serviceStart();
+  }
+
+  @Override
+  protected void serviceStop() throws Exception {
+    LOG.info("stop service - " + getName());
+    singletonInstance = null;
+    super.serviceStop();
   }
 
   public static SchemaManager getInstance(CatalogStore catalogStore) {
@@ -74,7 +82,7 @@ public final class SchemaManager {
   }
 
   public void loadDataSource(DataSource dataSource) {
-    SchemaPlus newRootSchema = Frameworks.createRootSchema(false);
+    SchemaPlus newRootSchema = Frameworks.createRootSchema(true);
     TrainDBJdbcDataSource newJdbcDataSource = new TrainDBJdbcDataSource(newRootSchema, dataSource);
     newRootSchema.add(newJdbcDataSource.getName(), newJdbcDataSource);
     addDataSourceToMaps(newJdbcDataSource);
@@ -133,67 +141,5 @@ public final class SchemaManager {
 
   public void unlockRead() {
     readLock.unlock();
-  }
-
-  public List<String> toFullyQualifiedTableName(List<String> names, String defaultSchema) {
-    TrainDBDataSource dataSource = null;
-    TrainDBSchema schema = null;
-    TrainDBTable table = null;
-
-    List<TrainDBDataSource> candidateDataSources;
-    List<TrainDBSchema> candidateSchemas;
-
-    switch (names.size()) {
-      case 1: // table
-        candidateSchemas = schemaMap.get(defaultSchema);
-        if (candidateSchemas == null || candidateSchemas.size() != 1) {
-          throw new RuntimeException("invalid name: " + defaultSchema + "." + names.get(0));
-        }
-        schema = candidateSchemas.get(0);
-        table = (TrainDBTable) schema.getTable(names.get(0));
-        if (table == null) {
-          throw new RuntimeException("invalid name: " + defaultSchema + "." + names.get(0));
-        }
-        dataSource = schema.getDataSource();
-        break;
-      case 2: // schema.table
-        candidateSchemas = schemaMap.get(names.get(0));
-        if (candidateSchemas == null || candidateSchemas.size() != 1) {
-          throw new RuntimeException("invalid name: " + names.get(0) + "." + names.get(1));
-        }
-        schema = candidateSchemas.get(0);
-        table = (TrainDBTable) schema.getTable(names.get(1));
-        if (table == null) {
-          throw new RuntimeException("invalid name: " + names.get(0) + "." + names.get(1));
-        }
-        dataSource = schema.getDataSource();
-        break;
-      case 3: // dataSource.schema.table
-        candidateDataSources = dataSourceMap.get(names.get(0));
-        if (candidateDataSources == null || candidateDataSources.size() != 1) {
-          throw new RuntimeException(
-              "invalid name: " + names.get(0) + "." + names.get(1) + "." + names.get(2));
-        }
-        dataSource = candidateDataSources.get(0);
-        schema = (TrainDBSchema) dataSource.getSubSchemaMap().get(names.get(1));
-        if (schema == null) {
-          throw new RuntimeException(
-              "invalid name: " + names.get(0) + "." + names.get(1) + "." + names.get(2));
-        }
-        table = (TrainDBTable) schema.getTable(names.get(2));
-        if (table == null) {
-          throw new RuntimeException(
-              "invalid name: " + names.get(0) + "." + names.get(1) + "." + names.get(2));
-        }
-        break;
-      default:
-        throw new RuntimeException("invalid identifier length: " + names.size());
-    }
-
-    List<String> fqn = new ArrayList<>();
-    fqn.add(dataSource.getName());
-    fqn.add(schema.getName());
-    fqn.add(table.getName());
-    return fqn;
   }
 }

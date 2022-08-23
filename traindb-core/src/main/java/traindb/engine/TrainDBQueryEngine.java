@@ -16,49 +16,29 @@ package traindb.engine;
 
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
+import com.opencsv.CSVWriter;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import org.apache.calcite.avatica.util.Casing;
-import org.apache.calcite.plan.RelOptUtil;
-import org.apache.calcite.rel.RelRoot;
-import org.apache.calcite.sql.SqlDialect;
-import org.apache.calcite.sql.SqlExplainFormat;
-import org.apache.calcite.sql.SqlExplainLevel;
-import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.parser.SqlParser;
-import org.apache.calcite.tools.FrameworkConfig;
-import org.apache.calcite.tools.Frameworks;
-import org.apache.calcite.tools.Planner;
-import org.apache.commons.lang3.exception.ExceptionUtils;
-import org.apache.commons.lang3.tuple.Pair;
+import java.util.Map;
 import org.json.simple.JSONObject;
-import org.verdictdb.VerdictSingleResult;
-import org.verdictdb.connection.CachedDbmsConnection;
-import org.verdictdb.connection.DbmsConnection;
-import org.verdictdb.connection.DbmsQueryResult;
-import org.verdictdb.connection.JdbcConnection;
-import org.verdictdb.connection.JdbcQueryResult;
-import org.verdictdb.coordinator.VerdictSingleResultFromDbmsQueryResult;
+import org.json.simple.parser.JSONParser;
 import traindb.catalog.CatalogContext;
 import traindb.catalog.CatalogException;
-import traindb.catalog.CatalogStore;
 import traindb.catalog.pm.MModel;
-import traindb.catalog.pm.MModelInstance;
+import traindb.catalog.pm.MModeltype;
 import traindb.catalog.pm.MSynopsis;
 import traindb.common.TrainDBConfiguration;
 import traindb.common.TrainDBException;
 import traindb.common.TrainDBLogger;
+import traindb.jdbc.TrainDBConnectionImpl;
 import traindb.schema.SchemaManager;
 import traindb.sql.TrainDBSqlRunner;
 
@@ -66,38 +46,35 @@ import traindb.sql.TrainDBSqlRunner;
 public class TrainDBQueryEngine implements TrainDBSqlRunner {
 
   private TrainDBLogger LOG = TrainDBLogger.getLogger(this.getClass());
-  private DbmsConnection conn;
+  private TrainDBConnectionImpl conn;
   private CatalogContext catalogContext;
   private SchemaManager schemaManager;
-  private TrainDBConfiguration conf;
 
-  public TrainDBQueryEngine(DbmsConnection conn, CatalogStore catalogStore,
-                            SchemaManager schemaManager, TrainDBConfiguration conf) {
+  public TrainDBQueryEngine(TrainDBConnectionImpl conn) {
     this.conn = conn;
-    this.catalogContext = catalogStore.getCatalogContext();
-    this.schemaManager = schemaManager;
-    this.conf = conf;
+    this.catalogContext = conn.getCatalogContext();
+    this.schemaManager = conn.getSchemaManager();
   }
 
   @Override
-  public void createModel(String modelName, String modelType, String modelLocation,
-                          String modelClassName, String modelUri) throws Exception {
-    if (catalogContext.modelExists(modelName)) {
-      throw new CatalogException("model '" + modelName + "' already exists");
+  public void createModeltype(String name, String category, String location,
+                              String className, String uri) throws Exception {
+    if (catalogContext.modeltypeExists(name)) {
+      throw new CatalogException("modeltype '" + name + "' already exists");
     }
-    catalogContext.createModel(modelName, modelType, modelLocation, modelClassName, modelUri);
+    catalogContext.createModeltype(name, category, location, className, uri);
   }
 
   @Override
-  public void dropModel(String modelName) throws Exception {
-    if (!catalogContext.modelExists(modelName)) {
-      throw new CatalogException("model '" + modelName + "' does not exist");
+  public void dropModeltype(String name) throws Exception {
+    if (!catalogContext.modeltypeExists(name)) {
+      throw new CatalogException("modeltype '" + name + "' does not exist");
     }
-    catalogContext.dropModel(modelName);
+    catalogContext.dropModeltype(name);
   }
 
-  private JSONObject getTableMetadata(String schemaName, String tableName,
-                                      List<String> columnNames) throws Exception {
+  private JSONObject getTableMetadata(String schemaName, String tableName, List<String> columnNames,
+                                      Map<String, Object> trainOptions) throws Exception {
     // query to get table metadata
     StringBuilder sb = new StringBuilder();
     sb.append("SELECT ");
@@ -113,11 +90,11 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
     sb.append(" WHERE 1<0");
 
     String sql = sb.toString();
-    DbmsQueryResult res = conn.execute(sql);
+    ResultSet res = conn.executeQueryInternal(sql);
 
     JSONObject root = new JSONObject();
     JSONObject fields = new JSONObject();
-    for (int i = 0; i < res.getColumnCount(); i++) {
+    for (int i = 1; i <= res.getMetaData().getColumnCount(); i++) {
       JSONObject typeInfo = new JSONObject();
 
       /* datatype (type, subtype)
@@ -131,7 +108,7 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
         ('id', 'integer'): 'int',
         ('id', 'string'): 'str'
        */
-      switch (res.getColumnType(i)) {
+      switch (res.getMetaData().getColumnType(i)) {
         case Types.CHAR:
         case Types.VARCHAR:
           typeInfo.put("type", "categorical");
@@ -164,18 +141,22 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
           break;
       }
 
-      fields.put(res.getColumnName(i), typeInfo);
+      fields.put(res.getMetaData().getColumnName(i), typeInfo);
     }
     root.put("fields", fields);
     root.put("schema", schemaName);
     root.put("table", tableName);
 
+    JSONObject options = new JSONObject();
+    options.putAll(trainOptions);
+    root.put("options", options);
+
     return root;
   }
 
   // FIXME temporary
-  private DbmsQueryResult getTrainingData(String schemaName, String tableName,
-                                              List<String> columnNames) throws Exception {
+  private ResultSet getTrainingData(String schemaName, String tableName,
+                                          List<String> columnNames) throws Exception {
     // query to get table metadata
     StringBuilder sb = new StringBuilder();
     sb.append("SELECT ");
@@ -190,25 +171,27 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
     sb.append(tableName);
 
     String sql = sb.toString();
-    DbmsQueryResult res = conn.execute(sql);
-    return res;
+    return conn.executeQueryInternal(sql);
   }
 
   @Override
-  public void trainModelInstance(
-      String modelName, String modelInstanceName, String schemaName, String tableName,
-      List<String> columnNames) throws Exception {
-    if (catalogContext.modelInstanceExists(modelInstanceName)) {
-      throw new CatalogException("model instance '" + modelInstanceName + "' already exist");
+  public void trainModel(
+      String modeltypeName, String modelName, String schemaName, String tableName,
+      List<String> columnNames, Map<String, Object> trainOptions) throws Exception {
+    if (!catalogContext.modeltypeExists(modeltypeName)) {
+      throw new CatalogException("modeltype '" + modeltypeName + "' does not exist");
+    }
+    if (catalogContext.modelExists(modelName)) {
+      throw new CatalogException("model '" + modelName + "' already exists");
     }
     if (schemaName == null) {
-      schemaName = conn.getDefaultSchema();
+      schemaName = conn.getSchema();
     }
 
-    JSONObject tableMetadata = getTableMetadata(schemaName, tableName, columnNames);
-    Path instancePath = catalogContext.getModelInstancePath(modelName, modelInstanceName);
-    Files.createDirectories(instancePath);
-    String outputPath = instancePath.toString();
+    JSONObject tableMetadata = getTableMetadata(schemaName, tableName, columnNames, trainOptions);
+    Path modelPath = catalogContext.getModelPath(modeltypeName, modelName);
+    Files.createDirectories(modelPath);
+    String outputPath = modelPath.toString();
 
     // write metadata for model training scripts in python
     String metadataFilename = outputPath + "/metadata.json";
@@ -218,80 +201,80 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
     fileWriter.close();
 
     // FIXME securely pass training data for ML model training
-    DbmsQueryResult trainingData = getTrainingData(schemaName, tableName, columnNames);
+    ResultSet trainingData = getTrainingData(schemaName, tableName, columnNames);
     String dataFilename = outputPath + "/data.csv";
     FileWriter datafileWriter = new FileWriter(dataFilename);
-    datafileWriter.write(new VerdictSingleResultFromDbmsQueryResult(trainingData).toCsv());
-    datafileWriter.flush();
-    datafileWriter.close();
+    CSVWriter csvWriter = new CSVWriter(datafileWriter, ',');
+    csvWriter.writeAll(trainingData, true);
+    csvWriter.close();
 
-    MModel mModel = catalogContext.getModel(modelName);
+    MModeltype mModeltype = catalogContext.getModeltype(modeltypeName);
 
     // train ML model
-    ProcessBuilder pb = new ProcessBuilder("python", conf.getModelRunnerPath(), "train",
-        mModel.getClassName(), TrainDBConfiguration.absoluteUri(mModel.getUri()),
+    ProcessBuilder pb = new ProcessBuilder("python",
+        TrainDBConfiguration.getModelRunnerPath(), "train",
+        mModeltype.getClassName(), TrainDBConfiguration.absoluteUri(mModeltype.getUri()),
         dataFilename, metadataFilename, outputPath);
     pb.inheritIO();
     Process process = pb.start();
     process.waitFor();
 
-    catalogContext.trainModelInstance(
-        modelName, modelInstanceName, schemaName, tableName, columnNames);
+    if (process.exitValue() != 0) {
+      throw new TrainDBException("failed to train model " + modelName);
+    }
+
+    String trainInfoFilename = outputPath + "/train_info.json";
+    JSONParser jsonParser = new JSONParser();
+    JSONObject jsonTrainInfo = (JSONObject) jsonParser.parse(new FileReader(trainInfoFilename));
+    Long baseTableRows = (Long) jsonTrainInfo.get("base_table_rows");
+    Long trainedRows = (Long) jsonTrainInfo.get("trained_rows");
+
+    catalogContext.trainModel(
+        modeltypeName, modelName, schemaName, tableName, columnNames,
+        baseTableRows, trainedRows, tableMetadata.get("options").toString());
   }
 
   @Override
-  public void dropModelInstance(String modelInstanceName) throws Exception {
-    if (!catalogContext.modelInstanceExists(modelInstanceName)) {
-      throw new CatalogException("model instance '" + modelInstanceName + "' does not exist");
+  public void dropModel(String modelName) throws Exception {
+    if (!catalogContext.modelExists(modelName)) {
+      throw new CatalogException("model '" + modelName + "' does not exist");
     }
-    catalogContext.dropModelInstance(modelInstanceName);
+    catalogContext.dropModel(modelName);
   }
 
-  private void createSynopsisTable(String synopsisName, MModelInstance mModelInstance)
+  private void createSynopsisTable(String synopsisName, MModel mModel)
       throws Exception {
     StringBuilder sb = new StringBuilder();
     sb.append("CREATE TABLE ");
-    sb.append(mModelInstance.getSchemaName());
+    sb.append(mModel.getSchemaName());
     sb.append(".");
     sb.append(synopsisName);
     sb.append(" AS SELECT ");
-    for (String columnName : mModelInstance.getColumnNames()) {
+    for (String columnName : mModel.getColumnNames()) {
       sb.append(columnName);
       sb.append(",");
     }
     sb.deleteCharAt(sb.lastIndexOf(","));
     sb.append(" FROM ");
-    sb.append(mModelInstance.getSchemaName());
+    sb.append(mModel.getSchemaName());
     sb.append(".");
-    sb.append(mModelInstance.getTableName());
+    sb.append(mModel.getTableName());
     sb.append(" WHERE 1<0");
 
     String sql = sb.toString();
-    conn.execute(sql);
-    schemaManager.refreshDataSource();
+    conn.executeInternal(sql);
+    conn.refreshRootSchema();
   }
 
-  private void loadSynopsisIntoTable(DbmsConnection dbmsConn, String synopsisName,
-                                     MModelInstance mModelInstance, String synopsisFile)
-      throws Exception {
-    Connection origConn = null;
-    if (dbmsConn instanceof CachedDbmsConnection) {
-      loadSynopsisIntoTable(((CachedDbmsConnection) dbmsConn).getOriginalConnection(),
-          synopsisName, mModelInstance, synopsisFile);
-      return;
-    } else if (dbmsConn instanceof JdbcConnection) {
-      origConn = ((JdbcConnection) dbmsConn).getConnection();
-    } else {
-      throw new TrainDBException("cannot load synopsis data into table");
-    }
-
+  private void loadSynopsisIntoTable(String synopsisName, MModel mModel,
+                                     String synopsisFile) throws Exception {
     StringBuilder sb = new StringBuilder();
     sb.append("INSERT INTO ");
-    sb.append(mModelInstance.getSchemaName());
+    sb.append(mModel.getSchemaName());
     sb.append(".");
     sb.append(synopsisName);
     sb.append(" VALUES (");
-    for (String columnName : mModelInstance.getColumnNames()) {
+    for (String columnName : mModel.getColumnNames()) {
       sb.append("?,");
     }
     sb.deleteCharAt(sb.lastIndexOf(","));
@@ -301,8 +284,8 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
         .withSkipLines(1).build();
     String sql = sb.toString();
 
-    PreparedStatement pstmt = origConn.prepareStatement(sql);
-    int collen = mModelInstance.getColumnNames().size();
+    PreparedStatement pstmt = conn.prepareInternal(sql);
+    int collen = mModel.getColumnNames().size();
     String[] row;
     try {
       while ((row = csvReader.readNext()) != null) {
@@ -322,47 +305,54 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
   }
 
   @Override
-  public void createSynopsis(String synopsisName, String modelInstanceName, int limitNumber)
+  public void createSynopsis(String synopsisName, String modelName, int limitNumber)
       throws Exception {
-    if (!catalogContext.modelInstanceExists(modelInstanceName)) {
-      throw new CatalogException("model instance '" + modelInstanceName + "' does not exist");
+    if (catalogContext.synopsisExists(synopsisName)) {
+      throw new CatalogException("synopsis '" + synopsisName + "' already exists");
     }
-    MModelInstance mModelInstance = catalogContext.getModelInstance(modelInstanceName);
-    MModel mModel = mModelInstance.getModel();
-    String instancePath =
-        catalogContext.getModelInstancePath(mModel.getName(), mModelInstance.getName()).toString();
-    String outputPath = instancePath + '/' + synopsisName + ".csv";
+    if (!catalogContext.modelExists(modelName)) {
+      throw new CatalogException("model '" + modelName + "' does not exist");
+    }
+    MModel mModel = catalogContext.getModel(modelName);
+    MModeltype mModeltype = mModel.getModeltype();
+    String modelPath =
+        catalogContext.getModelPath(mModeltype.getName(), mModel.getName()).toString();
+    String outputPath = modelPath + '/' + synopsisName + ".csv";
 
     // generate synopsis from ML model
-    ProcessBuilder pb = new ProcessBuilder("python", conf.getModelRunnerPath(), "synopsis",
-        mModel.getClassName(), TrainDBConfiguration.absoluteUri(mModel.getUri()),
-        instancePath, String.valueOf(limitNumber), outputPath);
+    ProcessBuilder pb = new ProcessBuilder("python",
+        TrainDBConfiguration.getModelRunnerPath(), "synopsis",
+        mModeltype.getClassName(), TrainDBConfiguration.absoluteUri(mModeltype.getUri()),
+        modelPath, String.valueOf(limitNumber), outputPath);
     pb.inheritIO();
     Process process = pb.start();
     process.waitFor();
 
-    // create synopsis table from generated synopsis file
-    if (conn.getTables(mModelInstance.getSchemaName()).contains(synopsisName)) {
-      throw new CatalogException("table '" + mModelInstance.getSchemaName() + "." + synopsisName
-          + "' already exists in source DBMS");
+    if (process.exitValue() != 0) {
+      throw new TrainDBException("failed to create synopsis " + synopsisName);
     }
-    createSynopsisTable(synopsisName, mModelInstance);
-    loadSynopsisIntoTable(conn, synopsisName, mModelInstance, outputPath);
-
-    catalogContext.createSynopsis(synopsisName, modelInstanceName);
+    double ratio = (double) limitNumber / (double) mModel.getBaseTableRows();
+    catalogContext.createSynopsis(synopsisName, modelName, limitNumber, ratio);
+    try {
+      createSynopsisTable(synopsisName, mModel);
+      loadSynopsisIntoTable(synopsisName, mModel, outputPath);
+    } catch (Exception e) {
+      dropSynopsisTable(synopsisName);
+      throw new TrainDBException("failed to create synopsis " + synopsisName);
+    }
   }
 
   private void dropSynopsisTable(String synopsisName) throws Exception {
     MSynopsis mSynopsis = catalogContext.getSynopsis(synopsisName);
     StringBuilder sb = new StringBuilder();
     sb.append("DROP TABLE ");
-    sb.append(mSynopsis.getModelInstance().getSchemaName());
+    sb.append(mSynopsis.getModel().getSchemaName());
     sb.append(".");
     sb.append(synopsisName);
 
     String sql = sb.toString();
-    conn.execute(sql);
-    schemaManager.refreshDataSource();
+    conn.executeInternal(sql);
+    conn.refreshRootSchema();
   }
 
   @Override
@@ -375,133 +365,106 @@ public class TrainDBQueryEngine implements TrainDBSqlRunner {
   }
 
   @Override
-  public VerdictSingleResult showModels() throws Exception {
-    List<String> header = Arrays.asList("model", "type", "location", "class", "uri");
+  public TrainDBListResultSet showModeltypes() throws Exception {
+    List<String> header = Arrays.asList("modeltype", "category", "location", "class", "uri");
+    List<List<Object>> modeltypeInfo = new ArrayList<>();
+
+    for (MModeltype mModeltype : catalogContext.getModeltypes()) {
+      modeltypeInfo.add(Arrays.asList(mModeltype.getName(), mModeltype.getType(),
+          mModeltype.getLocation(), mModeltype.getClassName(), mModeltype.getUri()));
+    }
+
+    return new TrainDBListResultSet(header, modeltypeInfo);
+  }
+
+  @Override
+  public TrainDBListResultSet showModels() throws Exception {
+    List<String> header = Arrays.asList("model", "modeltype", "schema", "table", "columns",
+        "base_table_rows", "trained_rows", "options");
     List<List<Object>> modelInfo = new ArrayList<>();
 
     for (MModel mModel : catalogContext.getModels()) {
-      modelInfo.add(Arrays.asList(mModel.getName(), mModel.getType(), mModel.getLocation(),
-          mModel.getClassName(), mModel.getUri()));
+      modelInfo.add(Arrays.asList(mModel.getName(), mModel.getModeltype().getName(),
+          mModel.getSchemaName(), mModel.getTableName(),
+          mModel.getColumnNames().toString(), mModel.getBaseTableRows(),
+          mModel.getTrainedRows(), mModel.getOptions()));
     }
 
-    VerdictSingleResult result = new TrainDBResultFromListData(header, modelInfo);
-    return result;
+    return new TrainDBListResultSet(header, modelInfo);
   }
 
   @Override
-  public VerdictSingleResult showModelInstances() throws Exception {
-    List<String> header = Arrays.asList("model", "model_instance", "schema", "table", "columns");
-    List<List<Object>> modelInstanceInfo = new ArrayList<>();
-
-    for (MModelInstance mModelInstance : catalogContext.getModelInstances()) {
-      modelInstanceInfo.add(Arrays.asList(mModelInstance.getModel().getName(),
-          mModelInstance.getName(), mModelInstance.getSchemaName(), mModelInstance.getTableName(),
-          mModelInstance.getColumnNames().toString()));
-    }
-
-    VerdictSingleResult result = new TrainDBResultFromListData(header, modelInstanceInfo);
-    return result;
-  }
-
-  @Override
-  public VerdictSingleResult showSynopses() throws Exception {
-    List<String> header = Arrays.asList("synopsis", "model_instance", "schema", "table", "columns");
+  public TrainDBListResultSet showSynopses() throws Exception {
+    List<String> header = Arrays.asList("synopsis", "model", "schema", "table", "columns",
+        "rows", "ratio");
     List<List<Object>> synopsisInfo = new ArrayList<>();
 
-    for (MSynopsis mSynopsis : catalogContext.getSynopses()) {
-      MModelInstance mModelInstance = mSynopsis.getModelInstance();
-      synopsisInfo.add(Arrays.asList(mSynopsis.getName(), mModelInstance.getName(),
-          mModelInstance.getSchemaName(), mModelInstance.getTableName(),
-          mModelInstance.getColumnNames()));
+    for (MSynopsis mSynopsis : catalogContext.getAllSynopses()) {
+      MModel mModel = mSynopsis.getModel();
+      synopsisInfo.add(Arrays.asList(mSynopsis.getName(), mModel.getName(),
+          mModel.getSchemaName(), mModel.getTableName(), mModel.getColumnNames(),
+          mSynopsis.getRows(), String.format("%.8f", mSynopsis.getRatio())));
     }
 
-    VerdictSingleResult result = new TrainDBResultFromListData(header, synopsisInfo);
-    return result;
+    return new TrainDBListResultSet(header, synopsisInfo);
   }
 
   @Override
-  public VerdictSingleResult showSchemas() throws Exception {
+  public TrainDBListResultSet showSchemas() throws Exception {
     List<String> header = Arrays.asList("schema");
     List<List<Object>> schemaInfo = new ArrayList<>();
-    List<String> rows = conn.getSchemas();
+    ResultSet rows = conn.getMetaData().getSchemas(conn.getCatalog(), null);
 
-    for (Object o : rows) {
-      schemaInfo.add(Arrays.asList(o));
+    while (rows.next()) {
+      schemaInfo.add(Arrays.asList(rows.getString(1)));
     }
 
-    VerdictSingleResult result = new TrainDBResultFromListData(header, schemaInfo);
-    return result;
+    return new TrainDBListResultSet(header, schemaInfo);
   }
 
   @Override
-  public VerdictSingleResult showTables() throws Exception {
+  public TrainDBListResultSet showTables() throws Exception {
     List<String> header = Arrays.asList("table");
     List<List<Object>> tableInfo = new ArrayList<>();
-    List<String> rows = conn.getTables(conn.getDefaultSchema());
 
-    for (Object o : rows) {
-      tableInfo.add(Arrays.asList(o));
+    ResultSet rs = conn.getMetaData().getTables(
+        conn.getCatalog(), conn.getSchema(), null, null);
+
+    while (rs.next()) {
+      tableInfo.add(Arrays.asList(rs.getString(3)));
     }
 
-    VerdictSingleResult result = new TrainDBResultFromListData(header, tableInfo);
-    return result;
+    return new TrainDBListResultSet(header, tableInfo);
   }
 
   @Override
   public void useSchema(String schemaName) throws Exception {
-    if (!conn.getSchemas().contains(schemaName)) {
+    ResultSet rs = conn.getMetaData().getSchemas(conn.getCatalog(), schemaName);
+    if (!rs.isBeforeFirst()) {
       throw new CatalogException("schema '" + schemaName + "' does not exist");
     }
-    conn.setDefaultSchema(schemaName);
+    conn.setSchema(schemaName);
   }
 
   @Override
-  public VerdictSingleResult describeTable(String schemaName, String tableName) throws Exception {
+  public TrainDBListResultSet describeTable(String schemaName, String tableName) throws Exception {
     List<String> header = Arrays.asList("column name", "column type");
     List<List<Object>> columnInfo = new ArrayList<>();
     if (schemaName == null) {
-      schemaName = conn.getDefaultSchema();
+      schemaName = conn.getSchema();
     }
-    List<Pair<String, String>> rows = conn.getColumns(schemaName, tableName);
+    ResultSet rs = conn.getMetaData().getColumns(conn.getCatalog(), schemaName, tableName, null);
 
-    for (Pair<String, String> pair : rows) {
-      columnInfo.add(Arrays.asList(pair.getLeft(), pair.getRight()));
+    while (rs.next()) {
+      columnInfo.add(Arrays.asList(rs.getString(4), rs.getString(6)));
     }
 
-    VerdictSingleResult result = new TrainDBResultFromListData(header, columnInfo);
-    return result;
+    return new TrainDBListResultSet(header, columnInfo);
   }
 
   @Override
-  public VerdictSingleResult processQuery(String query) throws Exception {
-    SqlParser.Config parserConf = SqlParser.config().withUnquotedCasing(Casing.TO_LOWER);
-    FrameworkConfig config = Frameworks.newConfigBuilder()
-        .defaultSchema(schemaManager.getCurrentSchema())
-        .parserConfig(parserConf).build();
-    Planner planner = Frameworks.getPlanner(config);
-    SqlNode parse = planner.parse(query);
-    TableNameQualifier.toFullyQualifiedName(schemaManager, conn.getDefaultSchema(), parse);
-    LOG.debug("Parsed query: " + parse.toString());
-
-    SqlNode validate = planner.validate(parse);
-    RelRoot relRoot = planner.rel(validate);
-    LOG.debug(
-        RelOptUtil.dumpPlan("Generated plan: ", relRoot.rel, SqlExplainFormat.TEXT,
-            SqlExplainLevel.ALL_ATTRIBUTES));
-
-    SqlDialect.DatabaseProduct dp = SqlDialect.DatabaseProduct.POSTGRESQL;
-    String queryString = validate.toSqlString(dp.getDialect()).getSql();
-    LOG.debug("query string: " + queryString);
-
-    try {
-      Connection internalConn = DriverManager.getConnection("jdbc:traindb-calcite:");
-      PreparedStatement stmt = internalConn.prepareStatement(queryString);
-      ResultSet rs = stmt.executeQuery();
-      return new VerdictSingleResultFromDbmsQueryResult(new JdbcQueryResult(rs));
-    } catch (SQLException e) {
-      LOG.debug(ExceptionUtils.getStackTrace(e));
-    }
-
-    return null;
+  public void bypassDdlStmt(String stmt) throws Exception {
+    conn.executeInternal(stmt);
+    conn.refreshRootSchema();
   }
 }

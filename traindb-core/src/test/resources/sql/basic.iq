@@ -1,101 +1,77 @@
-# simple.iq
-!use instacart
+# basic.iq
+!use instacart_small
 !set outputformat mysql
 
-CREATE MODEL tablegan TYPE SYNOPSIS LOCAL AS 'TableGAN' IN 'models/TableGAN.py';
-(0 rows modified)
-
-!update
-
-SHOW MODELS;
-+----------+----------+----------+----------+--------------------+
-| model    | type     | location | class    | uri                |
-+----------+----------+----------+----------+--------------------+
-| tablegan | SYNOPSIS | LOCAL    | TableGAN | models/TableGAN.py |
-+----------+----------+----------+----------+--------------------+
+SELECT count(*) as cnt FROM (select * from instacart_small.order_products) t;
++---------+
+| cnt     |
++---------+
+| 1384617 |
++---------+
 (1 row)
 
 !ok
 
-TRAIN MODEL tablegan INSTANCE tgan ON instacart.order_products(product_id, add_to_cart_order);
-(0 rows modified)
-
-!update
-
-SHOW MODEL INSTANCES;
-+----------+----------------+-----------+----------------+---------------------------------+
-| model    | model_instance | schema    | table          | columns                         |
-+----------+----------------+-----------+----------------+---------------------------------+
-| tablegan | tgan           | instacart | order_products | [product_id, add_to_cart_order] |
-+----------+----------------+-----------+----------------+---------------------------------+
+SELECT count(product_name) as cnt
+FROM instacart_small.aisles JOIN instacart_small.products
+ON instacart_small.aisles.aisle_id = instacart_small.products.aisle_id;
++-------+
+| cnt   |
++-------+
+| 49688 |
++-------+
 (1 row)
 
 !ok
 
-CREATE SYNOPSIS order_products_syn FROM MODEL INSTANCE tgan LIMIT 1000;
-(0 rows modified)
-
-!update
-
-SHOW SYNOPSES;
-+--------------------+----------------+-----------+----------------+---------------------------------+
-| synopsis           | model_instance | schema    | table          | columns                         |
-+--------------------+----------------+-----------+----------------+---------------------------------+
-| order_products_syn | tgan           | instacart | order_products | [product_id, add_to_cart_order] |
-+--------------------+----------------+-----------+----------------+---------------------------------+
+SELECT count(product_name) as cnt
+FROM instacart_small.aisles JOIN instacart_small.products
+ON aisles.aisle_id = products.aisle_id;
++-------+
+| cnt   |
++-------+
+| 49688 |
++-------+
 (1 row)
 
 !ok
 
-SELECT count(*) as c2 FROM instacart.order_products_syn;
-+------+
-| c2   |
-+------+
-| 1000 |
-+------+
+USE instacart_small;
+(0 rows modified)
+
+!update
+
+SELECT count(*) as cnt FROM (select * from order_products where product_id < 1000) t;
++-------+
+| cnt   |
++-------+
+| 21212 |
++-------+
 (1 row)
 
 !ok
 
-DROP SYNOPSIS order_products_syn;
-(0 rows modified)
-
-!update
-
-SHOW SYNOPSES;
-+
- |
-+
-+
-(0 rows)
+SELECT count(*) as cnt
+FROM order_products as a, (select * from instacart_small.order_products where product_id < 1000) as b
+WHERE a.product_id = b.product_id;
++---------+
+| cnt     |
++---------+
+| 8488212 |
++---------+
+(1 row)
 
 !ok
 
-DROP MODEL INSTANCE tgan;
-(0 rows modified)
-
-!update
-
-SHOW MODEL INSTANCES;
-+
- |
-+
-+
-(0 rows)
-
-!ok
-
-DROP MODEL tablegan;
-(0 rows modified)
-
-!update
-
-SHOW MODELS;
-+
- |
-+
-+
-(0 rows)
+WITH b as (select * from instacart_small.order_products where product_id < 1000)
+SELECT count(*) as cnt
+FROM instacart_small.order_products a, b
+WHERE a.product_id = b.product_id;
++---------+
+| cnt     |
++---------+
+| 8488212 |
++---------+
+(1 row)
 
 !ok
-

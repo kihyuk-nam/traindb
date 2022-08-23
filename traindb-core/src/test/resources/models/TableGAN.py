@@ -32,15 +32,15 @@ class TableGAN(TrainDBSynopsisModel, SDGymTableGAN):
                  batch_size=500,
                  epochs=1):
  
-        self.ht = rdt.HyperTransformer(dtype_transformers={
-            'O': 'label_encoding',
+        self.ht = rdt.HyperTransformer(default_data_type_transformers={
+            'categorical': 'LabelEncodingTransformer',
         })
         self.columns = []
 
         super().__init__(random_dim, num_channels, l2scale, batch_size, epochs)
 
     def train(self, real_data, table_metadata):
-        columns, categoricals = self._get_columns(real_data, table_metadata)
+        columns, categoricals = self.get_columns(real_data, table_metadata)
         real_data = real_data[columns]
         self.columns = columns
 

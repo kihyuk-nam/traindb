@@ -16,19 +16,24 @@ package traindb.common;
 
 import java.io.File;
 import java.io.InputStream;
+import java.util.Enumeration;
 import java.util.Properties;
-import org.verdictdb.commons.VerdictOption;
+import org.apache.calcite.avatica.util.Casing;
+import org.apache.calcite.config.CalciteConnectionConfigImpl;
+import org.apache.hadoop.conf.Configuration;
 
-public class TrainDBConfiguration extends VerdictOption {
+public class TrainDBConfiguration extends CalciteConnectionConfigImpl {
+  private static final TrainDBLogger LOG = TrainDBLogger.getLogger(TrainDBConfiguration.class);
 
-  private final TrainDBLogger LOG = TrainDBLogger.getLogger(this.getClass());
+  public static final String CATALOG_STORE_PROPERTY_PREFIX = "catalog.store.";
+  public static final String SERVER_PROPERTY_PREFIX = "traindb.server.";
 
   private final String TRAINDB_CONFIG_FILENAME = "traindb.properties";
   private Properties props;
 
-  public TrainDBConfiguration() {
-    super();
-    this.props = new Properties();
+  public TrainDBConfiguration(Properties p) {
+    super(p);
+    this.props = p;
   }
 
   public void loadConfiguration() {
@@ -36,12 +41,6 @@ public class TrainDBConfiguration extends VerdictOption {
       loadConfigurationFile(props, TRAINDB_CONFIG_FILENAME);
     } catch (Exception e) {
       LOG.debug("Could not load configuration file.");
-    }
-
-    if (LOG.isDebugEnabled()) {
-      for (Object key : props.keySet()) {
-        LOG.debug(key + "=" + props.getProperty(key.toString()));
-      }
     }
   }
 
@@ -54,7 +53,7 @@ public class TrainDBConfiguration extends VerdictOption {
     return props;
   }
 
-  public String getModelRunnerPath() {
+  public static String getModelRunnerPath() {
     return getTrainDBPrefixPath() + "/models/TrainDBModelRunner.py";
   }
 
@@ -72,5 +71,20 @@ public class TrainDBConfiguration extends VerdictOption {
       return getTrainDBPrefixPath() + "/" + uri;
     }
     return uri;
+  }
+
+  @Override
+  public Casing unquotedCasing() {
+    return Casing.TO_LOWER;
+  }
+
+  public Configuration asHadoopConfiguration() {
+    Configuration hadoopConf = new Configuration();
+    Enumeration<?> propsEnum = props.propertyNames();
+    while (propsEnum.hasMoreElements()) {
+      String key = propsEnum.nextElement().toString();
+      hadoopConf.set(key, props.getProperty(key));
+    }
+    return hadoopConf;
   }
 }

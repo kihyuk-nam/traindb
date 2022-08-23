@@ -18,12 +18,12 @@ public abstract class TrainDBSqlCommand {
   public abstract Type getType();
 
   public enum Type {
-    CREATE_MODEL,
-    DROP_MODEL,
+    CREATE_MODELTYPE,
+    DROP_MODELTYPE,
+    SHOW_MODELTYPES,
     SHOW_MODELS,
-    SHOW_MODEL_INSTANCES,
-    TRAIN_MODEL_INSTANCE,
-    DROP_MODEL_INSTANCE,
+    TRAIN_MODEL,
+    DROP_MODEL,
     CREATE_SYNOPSIS,
     DROP_SYNOPSIS,
     SHOW_SYNOPSES,
@@ -31,6 +31,7 @@ public abstract class TrainDBSqlCommand {
     SHOW_TABLES,
     USE_SCHEMA,
     DESCRIBE_TABLE,
+    BYPASS_DDL_STMT,
     OTHER
   }
 }
