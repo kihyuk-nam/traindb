@@ -15,7 +15,9 @@
 package traindb.adapter;
 
 import org.apache.calcite.avatica.util.Casing;
+import org.apache.calcite.avatica.util.Quoting;
 import org.apache.calcite.sql.SqlDialect;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 public abstract class TrainDBSqlDialect extends SqlDialect {
   public static final SqlDialect.Context DEFAULT_CONTEXT = SqlDialect.EMPTY_CONTEXT
@@ -34,5 +36,14 @@ public abstract class TrainDBSqlDialect extends SqlDialect {
 
   public boolean supportCatalogs() {
     return true;
+  }
+
+  public boolean supportCreateTableAsSelect() {
+    return true;
+  }
+
+  @Override
+  public @Nullable Quoting getQuoting() {
+    return super.getQuoting();
   }
 }

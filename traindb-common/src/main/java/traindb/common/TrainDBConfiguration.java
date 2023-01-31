@@ -19,21 +19,49 @@ import java.io.InputStream;
 import java.util.Enumeration;
 import java.util.Properties;
 import org.apache.calcite.avatica.util.Casing;
+import org.apache.calcite.avatica.util.Quoting;
 import org.apache.calcite.config.CalciteConnectionConfigImpl;
+import org.apache.calcite.config.CalciteConnectionProperty;
 import org.apache.hadoop.conf.Configuration;
 
 public class TrainDBConfiguration extends CalciteConnectionConfigImpl {
-  private static final TrainDBLogger LOG = TrainDBLogger.getLogger(TrainDBConfiguration.class);
-
   public static final String CATALOG_STORE_PROPERTY_PREFIX = "catalog.store.";
   public static final String SERVER_PROPERTY_PREFIX = "traindb.server.";
-
+  private static final TrainDBLogger LOG = TrainDBLogger.getLogger(TrainDBConfiguration.class);
   private final String TRAINDB_CONFIG_FILENAME = "traindb.properties";
   private Properties props;
 
   public TrainDBConfiguration(Properties p) {
     super(p);
     this.props = p;
+  }
+
+  public String getModelRunner() {
+    return (String) props.getOrDefault("traindb.server.modelrunner", "file");
+  }
+
+  public boolean queryLog() {
+    return Boolean.parseBoolean((String) props.getOrDefault("traindb.server.querylog", "false"));
+  }
+
+  public boolean taskTrace() {
+    return Boolean.parseBoolean((String) props.getOrDefault("traindb.server.tasktrace", "false"));
+  }
+
+  public static String getTrainDBPrefixPath() {
+    String prefix = System.getProperty("TRAINDB_PREFIX");
+    if (prefix == null) {
+      prefix = System.getenv("TRAINDB_PREFIX");
+    }
+    return prefix.trim();
+  }
+
+  public static String absoluteUri(String uri) {
+    File f = new File(uri);
+    if (!f.isAbsolute()) {
+      return getTrainDBPrefixPath() + "/" + uri;
+    }
+    return uri;
   }
 
   public void loadConfiguration() {
@@ -53,29 +81,27 @@ public class TrainDBConfiguration extends CalciteConnectionConfigImpl {
     return props;
   }
 
-  public static String getModelRunnerPath() {
-    return getTrainDBPrefixPath() + "/models/TrainDBModelRunner.py";
-  }
-
-  public static String getTrainDBPrefixPath() {
-    String prefix = System.getProperty("TRAINDB_PREFIX");
-    if (prefix == null) {
-      prefix = System.getenv("TRAINDB_PREFIX");
-    }
-    return prefix.trim();
-  }
-
-  public static String absoluteUri(String uri) {
-    File f = new File(uri);
-    if (!f.isAbsolute()) {
-      return getTrainDBPrefixPath() + "/" + uri;
-    }
-    return uri;
+  @Override
+  public Quoting quoting() {
+    return (Quoting) props.getOrDefault(
+        CalciteConnectionProperty.QUOTING.name(), Quoting.DOUBLE_QUOTE);
   }
 
   @Override
   public Casing unquotedCasing() {
-    return Casing.TO_LOWER;
+    return (Casing) props.getOrDefault(
+        CalciteConnectionProperty.UNQUOTED_CASING.name(), Casing.TO_LOWER);
+  }
+
+  @Override
+  public Casing quotedCasing() {
+    return (Casing) props.getOrDefault(
+        CalciteConnectionProperty.QUOTED_CASING.name(), Casing.UNCHANGED);
+  }
+
+  @Override
+  public boolean caseSensitive() {
+    return (Boolean) props.getOrDefault(CalciteConnectionProperty.CASE_SENSITIVE.name(), true);
   }
 
   public Configuration asHadoopConfiguration() {
@@ -86,5 +112,13 @@ public class TrainDBConfiguration extends CalciteConnectionConfigImpl {
       hadoopConf.set(key, props.getProperty(key));
     }
     return hadoopConf;
+  }
+
+  public String getAqpExecTimePolicy() {
+    return (String) props.get("traindb.aqp.exec.time.policy");
+  }
+
+  public String getAqpExecTimeUnitAmount() {
+    return (String) props.get("traindb.aqp.exec.time.unit-amount");
   }
 }

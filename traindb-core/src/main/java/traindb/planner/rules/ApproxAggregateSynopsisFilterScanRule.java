@@ -14,6 +14,7 @@
 
 package traindb.planner.rules;
 
+import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -23,12 +24,15 @@ import org.apache.calcite.prepare.RelOptTableImpl;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
-import org.apache.calcite.rel.core.Project;
+import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.rules.SubstitutionRule;
+import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.tools.RelBuilder;
+import org.apache.calcite.util.mapping.Mappings;
 import org.immutables.value.Value;
 import traindb.adapter.jdbc.JdbcConvention;
 import traindb.adapter.jdbc.JdbcTableScan;
@@ -37,11 +41,11 @@ import traindb.catalog.pm.MSynopsis;
 import traindb.planner.TrainDBPlanner;
 
 @Value.Enclosing
-public class ApproxAggregateSynopsisProjectScanRule
-    extends RelRule<ApproxAggregateSynopsisProjectScanRule.Config>
+public class ApproxAggregateSynopsisFilterScanRule
+    extends RelRule<ApproxAggregateSynopsisFilterScanRule.Config>
     implements SubstitutionRule {
 
-  protected ApproxAggregateSynopsisProjectScanRule(Config config) {
+  protected ApproxAggregateSynopsisFilterScanRule(Config config) {
     super(config);
   }
 
@@ -69,7 +73,7 @@ public class ApproxAggregateSynopsisProjectScanRule
     List<TableScan> tableScans = ApproxAggregateUtil.findAllTableScans(aggregate);
     for (TableScan scan : tableScans) {
       RelNode parent = ApproxAggregateUtil.getParent(aggregate, scan);
-      if (parent == null || !(parent instanceof Project)) {
+      if (parent == null || !(parent instanceof Filter)) {
         continue;
       }
       if (ApproxAggregateUtil.getParent(aggregate, parent) != aggregate) {
@@ -77,12 +81,22 @@ public class ApproxAggregateSynopsisProjectScanRule
       }
 
       requiredColumnIndex.subList(aggColumnSize, requiredColumnIndex.size()).clear();
-      Project project = (Project) parent;
-      List<String> inputColumns = project.getRowType().getFieldNames();
+      Filter filter = (Filter) parent;
+      List<RexNode> rexNodes = ((RexCall) filter.getCondition()).getOperands();
+      for (RexNode rexNode : rexNodes) {
+        if (rexNode instanceof RexCall) {
+          rexNode = ((RexCall) rexNode).getOperands().get(0);
+        }
+        if (rexNode instanceof RexInputRef) {
+          requiredColumnIndex.add(((RexInputRef) rexNode).getIndex());
+        }
+      }
+      List<String> inputColumns = filter.getRowType().getFieldNames();
       List<String> requiredColumnNames =
           ApproxAggregateUtil.getSublistByIndex(inputColumns, requiredColumnIndex);
+      List<String> qualifiedTableName = scan.getTable().getQualifiedName();
       Collection<MSynopsis> candidateSynopses =
-          planner.getAvailableSynopses(scan.getTable().getQualifiedName(), requiredColumnNames);
+          planner.getAvailableSynopses(qualifiedTableName, requiredColumnNames);
       if (candidateSynopses == null || candidateSynopses.isEmpty()) {
         return;
       }
@@ -90,15 +104,11 @@ public class ApproxAggregateSynopsisProjectScanRule
       MSynopsis bestSynopsis =
           planner.getBestSynopsis(candidateSynopses, scan, aggregate.getHints());
 
-      final List<String> synopsisColumns = bestSynopsis.getModel().getColumnNames();
-
-      List<RexNode> oldProjects = project.getProjects();
-      List<RexNode> newProjects = new ArrayList<>();
-      for (int i = 0; i < oldProjects.size(); i++) {
-        RexInputRef inputRef = (RexInputRef) oldProjects.get(i);
-        int newIndex = synopsisColumns.indexOf(inputColumns.get(i));
-        newProjects.add(new RexInputRef(newIndex, inputRef.getType()));
+      List<Integer> targets = new ArrayList<>();
+      for (int i = 0; i < inputColumns.size(); i++) {
+        targets.add(bestSynopsis.getModel().getColumnNames().indexOf(inputColumns.get(i)));
       }
+      final Mappings.TargetMapping mapping = Mappings.source(targets, targets.size());
 
       RelOptTableImpl synopsisTable =
           (RelOptTableImpl) planner.getSynopsisTable(bestSynopsis, scan.getTable());
@@ -107,12 +117,19 @@ public class ApproxAggregateSynopsisProjectScanRule
 
       List<RexNode> aggProjects =
           ApproxAggregateUtil.makeAggregateProjects(aggregate, scan.getTable(), synopsisTable);
+      List<RexNode> newGroupSet = ApproxAggregateUtil.makeAggregateGroupSet(aggregate, mapping);
 
+      final ImmutableList.Builder<AggregateCall> newAggCalls = ImmutableList.builder();
+      aggregate.getAggCallList()
+          .forEach(aggregateCall -> newAggCalls.add(aggregateCall.transform(mapping)));
+
+      final RexNode newCondition = RexUtil.apply(mapping, filter.getCondition());
       RelNode node = relBuilder.push(newScan)
-          .project(newProjects, project.getRowType().getFieldNames())
-          .aggregate(relBuilder.groupKey(aggregate.getGroupSet()), aggregate.getAggCallList())
+          .filter(newCondition)
+          .aggregate(relBuilder.groupKey(newGroupSet), newAggCalls.build())
           .project(aggProjects, aggregate.getRowType().getFieldNames())
           .build();
+
       call.transformTo(node);
     }
   }
@@ -122,15 +139,15 @@ public class ApproxAggregateSynopsisProjectScanRule
    */
   @Value.Immutable(singleton = true)
   public interface Config extends RelRule.Config {
-    Config DEFAULT = ImmutableApproxAggregateSynopsisProjectScanRule.Config.of()
+    Config DEFAULT = ImmutableApproxAggregateSynopsisFilterScanRule.Config.of()
         .withOperandSupplier(b0 ->
             b0.operand(Aggregate.class)
                 .predicate(ApproxAggregateUtil::isApproximateAggregate)
                 .anyInputs());
 
     @Override
-    default ApproxAggregateSynopsisProjectScanRule toRule() {
-      return new ApproxAggregateSynopsisProjectScanRule(this);
+    default ApproxAggregateSynopsisFilterScanRule toRule() {
+      return new ApproxAggregateSynopsisFilterScanRule(this);
     }
   }
 }

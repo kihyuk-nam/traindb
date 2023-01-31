@@ -12,30 +12,18 @@
  * limitations under the License.
  */
 
-package traindb.sql;
+package traindb.planner.caqp;
 
-public abstract class TrainDBSqlCommand {
-  public abstract Type getType();
+import traindb.catalog.pm.MSynopsis;
 
-  public enum Type {
-    CREATE_MODELTYPE,
-    DROP_MODELTYPE,
-    SHOW_MODELTYPES,
-    SHOW_MODELS,
-    TRAIN_MODEL,
-    DROP_MODEL,
-    CREATE_SYNOPSIS,
-    DROP_SYNOPSIS,
-    SHOW_SYNOPSES,
-    SHOW_SCHEMAS,
-    SHOW_TABLES,
-    USE_SCHEMA,
-    DESCRIBE_TABLE,
-    BYPASS_DDL_STMT,
-    SHOW_QUERY_LOGS,
-    SHOW_TASKS,
-    DELETE_QUERY_LOGS,
-    DELETE_TASKS,
-    OTHER
+public abstract class CaqpExecutionTimePolicy {
+
+  protected double unitAmount;
+
+  public CaqpExecutionTimePolicy(double unitAmount) {
+    this.unitAmount = unitAmount;
   }
+
+  public abstract boolean check(MSynopsis synopsis, double time);
+
 }

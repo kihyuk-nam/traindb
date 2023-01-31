@@ -12,30 +12,18 @@
  * limitations under the License.
  */
 
-package traindb.sql;
+package traindb.engine;
 
-public abstract class TrainDBSqlCommand {
-  public abstract Type getType();
+public interface TrainDBModelRunner {
 
-  public enum Type {
-    CREATE_MODELTYPE,
-    DROP_MODELTYPE,
-    SHOW_MODELTYPES,
-    SHOW_MODELS,
-    TRAIN_MODEL,
-    DROP_MODEL,
-    CREATE_SYNOPSIS,
-    DROP_SYNOPSIS,
-    SHOW_SYNOPSES,
-    SHOW_SCHEMAS,
-    SHOW_TABLES,
-    USE_SCHEMA,
-    DESCRIBE_TABLE,
-    BYPASS_DDL_STMT,
-    SHOW_QUERY_LOGS,
-    SHOW_TASKS,
-    DELETE_QUERY_LOGS,
-    DELETE_TASKS,
-    OTHER
-  }
+  void init();
+
+  void connect(String driverClass, String url, String user, String password, String jdbcJarPath);
+
+  String trainModel(String sqlTrainingData, String modeltypeClass, String modelTypePath,
+                    String jsonTrainingMetadata, String modelPath);
+
+  void generateSynopsis(String modeltypeClass, String modeltypePath, String modelPath,
+                        int rowCount, String outputFile);
+
 }

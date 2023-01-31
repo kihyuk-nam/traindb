@@ -24,6 +24,9 @@ import org.antlr.v4.runtime.ConsoleErrorListener;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.misc.Interval;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
+import org.apache.calcite.avatica.util.Casing;
+import org.apache.calcite.sql.parser.SqlParser;
+import traindb.common.TrainDBException;
 import traindb.common.TrainDBLogger;
 import traindb.engine.TrainDBListResultSet;
 
@@ -32,9 +35,9 @@ public final class TrainDBSql {
   private TrainDBSql() {
   }
 
-  public static List<TrainDBSqlCommand> parse(String query) {
+  public static List<TrainDBSqlCommand> parse(String query, SqlParser.Config parserConfig) {
     ANTLRInputStream input = new ANTLRInputStream(query);
-    TrainDBSqlLexer lexer = new TrainDBSqlLexer(input);
+    TrainDBSqlLexer lexer = new TrainDBSqlLexer(input, parserConfig);
     CommonTokenStream tokens = new CommonTokenStream(lexer);
     TrainDBSqlParser parser = new TrainDBSqlParser(tokens);
     TrainDBErrorListener trainDBErrorListener = new TrainDBErrorListener();
@@ -113,10 +116,35 @@ public final class TrainDBSql {
         TrainDBSqlBypassDdlStmt bypassDdlStmt = (TrainDBSqlBypassDdlStmt) command;
         runner.bypassDdlStmt(bypassDdlStmt.getStatement());
         break;
+      case SHOW_QUERY_LOGS:
+        TrainDBSqlShowCommand showQueryLogs = (TrainDBSqlShowCommand) command;
+        return runner.showQueryLogs();
+      case SHOW_TASKS:
+        TrainDBSqlShowCommand showTasks = (TrainDBSqlShowCommand) command;
+        return runner.showTasks();
+      case DELETE_QUERY_LOGS:
+        TrainDBSqlDeleteQueryLogs deleteQueryLogs = (TrainDBSqlDeleteQueryLogs) command;
+        runner.deleteQueryLogs(deleteQueryLogs.getRowCount());
+        break;
+      case DELETE_TASKS:
+        TrainDBSqlDeleteTasks deleteTasks = (TrainDBSqlDeleteTasks) command;
+        runner.deleteTasks(deleteTasks.getRowCount());
+        break;
       default:
         throw new RuntimeException("invalid TrainDB SQL command");
     }
     return TrainDBListResultSet.empty();
+  }
+
+  public static String toCase(String s, Casing casing) {
+    switch (casing) {
+      case TO_UPPER:
+        return s.toUpperCase();
+      case TO_LOWER:
+        return s.toLowerCase();
+      default:
+        return s;
+    }
   }
 
   private static class Listener extends TrainDBSqlBaseListener {
@@ -238,6 +266,28 @@ public final class TrainDBSql {
     @Override
     public void exitShowTables(TrainDBSqlParser.ShowTablesContext ctx) {
       commands.add(new TrainDBSqlShowCommand.Tables());
+    }
+
+    @Override
+    public void exitShowQueryLogs(TrainDBSqlParser.ShowQueryLogsContext ctx) {
+      commands.add(new TrainDBSqlShowCommand.QueryLogs());
+    }
+
+    @Override
+    public void exitShowTasks(TrainDBSqlParser.ShowTasksContext ctx) {
+      commands.add(new TrainDBSqlShowCommand.Tasks());
+    }
+
+    @Override
+    public void exitDeleteQueryLogs(TrainDBSqlParser.DeleteQueryLogsContext ctx) {
+      int limitNumber = Integer.parseInt(ctx.limitNumber().getText());
+      commands.add(new TrainDBSqlDeleteQueryLogs(limitNumber));
+    }
+
+    @Override
+    public void exitDeleteTasks(TrainDBSqlParser.DeleteTasksContext ctx) {
+      int limitNumber = Integer.parseInt(ctx.limitNumber().getText());
+      commands.add(new TrainDBSqlDeleteTasks(limitNumber));
     }
 
     @Override

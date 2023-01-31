@@ -83,6 +83,7 @@ SELECT count(*) as c2 FROM instacart_small.order_products_syn;
 
 !ok
 
+# simple aggregation
 SELECT APPROXIMATE avg(add_to_cart_order) as average FROM instacart_small.order_products;
 
 JdbcToEnumerableConverter
@@ -91,6 +92,7 @@ JdbcToEnumerableConverter
       JdbcTableScan(table=[[traindb, instacart_small, order_products_syn]])
 !plan
 
+# order_id is not in the snyopsis -> exact query
 SELECT APPROXIMATE avg(order_id) as average FROM instacart_small.order_products;
 
 JdbcToEnumerableConverter
@@ -99,6 +101,7 @@ JdbcToEnumerableConverter
       JdbcTableScan(table=[[traindb, instacart_small, order_products]])
 !plan
 
+# scaling aggregation
 SELECT APPROXIMATE sum(reordered) FROM instacart_small.order_products;
 
 JdbcToEnumerableConverter
@@ -107,14 +110,34 @@ JdbcToEnumerableConverter
       JdbcTableScan(table=[[traindb, instacart_small, order_products_syn]])
 !plan
 
-#SELECT APPROXIMATE avg(add_to_cart_order) as average FROM instacart_small.order_products WHERE reordered = 1;
-#
-#JdbcToEnumerableConverter
-#  JdbcProject(average=[CAST(/(CASE(=($1, 0), null:INTEGER, $0), $1)):INTEGER])
-#    JdbcAggregate(group=[{}], agg#0=[$SUM0($1)], agg#1=[COUNT()])
-#      JdbcFilter(condition=[=($0, 1)])
-#        JdbcTableScan(table=[[traindb, instacart_small, order_products_syn]])
-#!plan
+# aggregation with WHERE clause
+SELECT APPROXIMATE avg(add_to_cart_order) as average FROM instacart_small.order_products WHERE reordered = 1;
+
+JdbcToEnumerableConverter
+  JdbcProject(average=[CAST(/(CAST(*(1384.617:DECIMAL(7, 3), CASE(=($1, 0), null:INTEGER, $0))):INTEGER, CAST(*(1384.617:DECIMAL(7, 3), $1)):BIGINT NOT NULL)):INTEGER])
+    JdbcAggregate(group=[{}], agg#0=[$SUM0($1)], agg#1=[COUNT()])
+      JdbcFilter(condition=[=($0, 1)])
+        JdbcTableScan(table=[[traindb, instacart_small, order_products_syn]])
+!plan
+
+# aggregation with WHERE and GROUP BY clauses
+SELECT APPROXIMATE reordered, count(*) as order_count FROM instacart_small.order_products WHERE add_to_cart_order < 5 GROUP BY reordered;
+
+JdbcToEnumerableConverter
+  JdbcProject(reordered=[$0], order_count=[CAST(*(1384.617:DECIMAL(7, 3), $1)):BIGINT NOT NULL])
+    JdbcAggregate(group=[{0}], order_count=[COUNT()])
+      JdbcFilter(condition=[<($1, 5)])
+        JdbcTableScan(table=[[traindb, instacart_small, order_products_syn]])
+!plan
+
+SELECT APPROXIMATE add_to_cart_order, count(add_to_cart_order) FROM instacart_small.order_products WHERE add_to_cart_order < 3 GROUP BY add_to_cart_order;
+
+JdbcToEnumerableConverter
+  JdbcProject(add_to_cart_order=[$0], EXPR$1=[CAST(*(1384.617:DECIMAL(7, 3), $1)):BIGINT NOT NULL])
+    JdbcAggregate(group=[{1}], EXPR$1=[COUNT()])
+      JdbcFilter(condition=[<($1, 3)])
+        JdbcTableScan(table=[[traindb, instacart_small, order_products_syn]])
+!plan
 
 DROP SYNOPSIS order_products_syn;
 (0 rows modified)

@@ -12,30 +12,27 @@
  * limitations under the License.
  */
 
-package traindb.sql;
+package traindb.adapter.python;
 
-public abstract class TrainDBSqlCommand {
-  public abstract Type getType();
+import org.apache.calcite.plan.Convention;
+import org.apache.calcite.rel.RelNode;
 
-  public enum Type {
-    CREATE_MODELTYPE,
-    DROP_MODELTYPE,
-    SHOW_MODELTYPES,
-    SHOW_MODELS,
-    TRAIN_MODEL,
-    DROP_MODEL,
-    CREATE_SYNOPSIS,
-    DROP_SYNOPSIS,
-    SHOW_SYNOPSES,
-    SHOW_SCHEMAS,
-    SHOW_TABLES,
-    USE_SCHEMA,
-    DESCRIBE_TABLE,
-    BYPASS_DDL_STMT,
-    SHOW_QUERY_LOGS,
-    SHOW_TASKS,
-    DELETE_QUERY_LOGS,
-    DELETE_TASKS,
-    OTHER
+/**
+ * Relational expression that uses Python calling convention.
+ */
+public interface PythonRel extends RelNode {
+
+  Convention CONVENTION = new Convention.Impl("PYTHON", PythonRel.class);
+
+  Result implement();
+
+  class Result {
+
+    public final PythonMLAggregateModel pyModel;
+
+    public Result(PythonMLAggregateModel pyModel) {
+      this.pyModel = pyModel;
+    }
   }
+
 }

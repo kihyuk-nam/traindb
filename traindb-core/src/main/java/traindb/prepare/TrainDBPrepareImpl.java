@@ -25,6 +25,8 @@ import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.sql.DatabaseMetaData;
 import java.sql.Types;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -602,7 +604,7 @@ public class TrainDBPrepareImpl extends CalcitePrepareImpl {
       // First check input query with TrainDB sql grammar
       List<TrainDBSqlCommand> commands = null;
       try {
-        commands = TrainDBSql.parse(query.sql);
+        commands = TrainDBSql.parse(query.sql, parserConfig);
       } catch (Exception e) {
         if (commands != null) {
           commands.clear();
@@ -610,14 +612,30 @@ public class TrainDBPrepareImpl extends CalcitePrepareImpl {
       }
       TrainDBConnectionImpl conn =
           (TrainDBConnectionImpl) context.getDataContext().getQueryProvider();
+
+      // INSERT QUERY LOGS
+      LocalDateTime now = LocalDateTime.now();
+      String currentTime = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS"));
+      String currentUser = conn.getProperties().getProperty("user");
+
       if (commands != null && commands.size() > 0) {
+        TrainDBQueryEngine engine = new TrainDBQueryEngine(conn);
         try {
-          TrainDBQueryEngine engine = new TrainDBQueryEngine(conn);
+          // INSERT QUERY LOGS
+          engine.insertQueryLogs(currentTime, currentUser, query.sql);
+
           return convertResultToSignature(context, query.sql,
               TrainDBSql.run(commands.get(0), engine));
         } catch (Exception e) {
           throw new RuntimeException(
               "failed to run statement: " + query + "\nerror msg: " + e.getMessage());
+        } finally {
+          try {
+            engine.insertTask();
+          } catch ( Exception e) {
+            throw new RuntimeException(
+                    "failed to run statement: " + query + "\nerror msg: " + e.getMessage());
+          }
         }
       }
 
@@ -629,6 +647,15 @@ public class TrainDBPrepareImpl extends CalcitePrepareImpl {
       } catch (SqlParseException e) {
         throw new RuntimeException(
             "parse failed: " + e.getMessage(), e);
+      }
+
+      // INSERT QUERY LOGS
+      try {
+        TrainDBQueryEngine engine = new TrainDBQueryEngine(conn);
+        engine.insertQueryLogs(currentTime, currentUser, query.sql);
+      } catch (Exception e) {
+        throw new RuntimeException(
+                "failed to query logging: " + query + "\nerror msg: " + e.getMessage());
       }
 
       Hook.PARSE_TREE.run(new Object[] {query.sql, sqlNode});

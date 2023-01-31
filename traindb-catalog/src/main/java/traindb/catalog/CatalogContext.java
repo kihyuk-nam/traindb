@@ -14,16 +14,17 @@
 
 package traindb.catalog;
 
-import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import traindb.catalog.pm.MModel;
 import traindb.catalog.pm.MModeltype;
+import traindb.catalog.pm.MQueryLog;
 import traindb.catalog.pm.MSynopsis;
+import traindb.catalog.pm.MTask;
 
 public interface CatalogContext {
 
-  /* Model */
+  /* Modeltype */
   boolean modeltypeExists(String name);
 
   MModeltype getModeltype(String name);
@@ -35,6 +36,7 @@ public interface CatalogContext {
 
   void dropModeltype(String name) throws CatalogException;
 
+  /* Model */
   MModel trainModel(
       String modeltypeName, String modelName, String schemaName, String tableName,
       List<String> columnNames, Long baseTableRows, Long trainedRows, String options)
@@ -44,12 +46,14 @@ public interface CatalogContext {
 
   Collection<MModel> getModels() throws CatalogException;
 
+  Collection<MModel> getInferenceModels(String baseSchema, String baseTable)
+      throws CatalogException;
+
   boolean modelExists(String name);
 
   MModel getModel(String name);
 
-  Path getModelPath(String modeltypeName, String modelName);
-
+  /* Synopsis */
   MSynopsis createSynopsis(String synopsisName, String modelName, Integer rows, Double ratio)
       throws CatalogException;
 
@@ -63,5 +67,20 @@ public interface CatalogContext {
 
   void dropSynopsis(String name) throws CatalogException;
 
+  /* Querylog */
+  Collection<MQueryLog> getQueryLog() throws CatalogException;
+
+  MQueryLog insertQueryLog(String start, String user, String query) throws CatalogException;
+
+  void deleteQueryLogs(Integer cnt) throws CatalogException;
+
+  /* Task */
+  Collection<MTask> getTaskLog() throws CatalogException;
+
+  MTask insertTask(String time, Integer idx, String task, String status) throws CatalogException;
+
+  void deleteTasks(Integer cnt) throws CatalogException;
+
+  /* Common */
   void close();
 }

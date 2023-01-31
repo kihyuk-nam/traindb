@@ -49,5 +49,17 @@ public interface TrainDBSqlRunner {
   TrainDBListResultSet describeTable(String schemaName, String tableName) throws Exception;
 
   void bypassDdlStmt(String stmt) throws Exception;
+
+  void insertQueryLogs(String start, String user, String query) throws Exception;
+
+  TrainDBListResultSet showQueryLogs() throws Exception;
+
+  void insertTask() throws Exception;
+
+  TrainDBListResultSet showTasks() throws Exception;
+
+  void deleteQueryLogs(Integer cnt) throws Exception;
+
+  void deleteTasks(Integer cnt) throws Exception;
 }
 
